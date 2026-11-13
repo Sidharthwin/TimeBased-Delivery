@@ -1,8 +1,8 @@
 // Prisma describes the tables and relationships that Prisma Migrate creates in PostgreSQL.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-js"
 }
 
 datasource db {
@@ -17,7 +17,7 @@ enum PlatformRole {
 enum AgencyRole {
   AGENCY_ADMIN
   DISPATCHER
-  WORKER
+  DELIVERY_WORKER
 }
 
 model User {
@@ -46,7 +46,8 @@ model AgencyUser {
   id        String     @id @default(uuid()) @db.Uuid
   userId    String     @db.Uuid
   agencyId  String     @db.Uuid
-  role      AgencyRole @default(WORKER)
+  role      AgencyRole @default(DELIVERY_WORKER)
+  isActive  Boolean    @default(true)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
