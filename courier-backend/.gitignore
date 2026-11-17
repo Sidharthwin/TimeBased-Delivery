@@ -1,8 +1,12 @@
 .env
 .env.*
+!.env.example
 
 node_modules/
 
 *.log
 
 .DS_Store
+/src/generated/
+/postgres-data/
+/pgdata/
