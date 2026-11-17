@@ -40,6 +40,7 @@ model CourierAgency {
   updatedAt DateTime @updatedAt
 
   userMemberships AgencyUser[]
+  serviceAreas    ServiceArea[]
 }
 
 model AgencyUser {
@@ -56,4 +57,20 @@ model AgencyUser {
 
   @@unique([userId, agencyId])
   @@index([agencyId, role])
+}
+
+model ServiceArea {
+  id         String   @id @default(uuid()) @db.Uuid
+  agencyId   String   @db.Uuid
+  name       String
+  city       String
+  state      String
+  postalCode String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agency CourierAgency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, postalCode])
+  @@index([agencyId, city])
 }
