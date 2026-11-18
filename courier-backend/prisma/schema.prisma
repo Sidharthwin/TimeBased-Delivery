@@ -1,8 +1,8 @@
 // Prisma describes the tables and relationships that Prisma Migrate creates in PostgreSQL.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-js"
 }
 
 datasource db {
@@ -17,7 +17,36 @@ enum PlatformRole {
 enum AgencyRole {
   AGENCY_ADMIN
   DISPATCHER
-  WORKER
+  DELIVERY_WORKER
+}
+
+enum ConsignmentStatus {
+  CREATED
+  CONFIRMED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  FAILED_DELIVERY
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum BookingHistoryAction {
+  CREATED
+  CANCELLED
+  RESCHEDULED
+  COMPLETED
+}
+
+enum DeliveryAttemptStatus {
+  SUCCESSFUL
+  FAILED
 }
 
 model User {
@@ -29,7 +58,14 @@ model User {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  agencyMemberships AgencyUser[]
+  agencyMemberships        AgencyUser[]
+  consignments             Consignment[]
+  consignmentStatusChanges ConsignmentStatusHistory[]
+  bookings                 Booking[]
+  bookingChanges           BookingHistory[] @relation("BookingActor")
+  deliveryAssignments     DeliveryAssignment[] @relation("AssignmentEmployee")
+  assignmentsMade         DeliveryAssignment[] @relation("AssignmentActor")
+  deliveryAttempts        DeliveryAttempt[]
 }
 
 model CourierAgency {
@@ -40,13 +76,19 @@ model CourierAgency {
   updatedAt DateTime @updatedAt
 
   userMemberships AgencyUser[]
+  serviceAreas    ServiceArea[]
+  consignments    Consignment[]
+  deliverySlots   DeliverySlot[]
+  bookings        Booking[]
+  deliveryAssignments DeliveryAssignment[]
 }
 
 model AgencyUser {
   id        String     @id @default(uuid()) @db.Uuid
   userId    String     @db.Uuid
   agencyId  String     @db.Uuid
-  role      AgencyRole @default(WORKER)
+  role      AgencyRole @default(DELIVERY_WORKER)
+  isActive  Boolean    @default(true)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -55,4 +97,171 @@ model AgencyUser {
 
   @@unique([userId, agencyId])
   @@index([agencyId, role])
+}
+
+model ServiceArea {
+  id         String   @id @default(uuid()) @db.Uuid
+  agencyId   String   @db.Uuid
+  name       String
+  city       String
+  state      String
+  postalCode String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agency CourierAgency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, postalCode])
+  @@index([agencyId, city])
+}
+
+model Consignment {
+  id                 String            @id @default(uuid()) @db.Uuid
+  trackingNumber     String            @unique
+  customerId         String            @db.Uuid
+  agencyId           String            @db.Uuid
+  senderName         String
+  senderPhone        String
+  senderAddress      String
+  senderPostalCode   String
+  receiverName       String
+  receiverPhone      String
+  receiverAddress    String
+  receiverPostalCode String
+  packageDescription String
+  packageWeight      Decimal           @db.Decimal(8, 3)
+  status             ConsignmentStatus @default(CREATED)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  customer      User                       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  agency        CourierAgency              @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  statusHistory ConsignmentStatusHistory[]
+  bookings      Booking[]
+  assignments   DeliveryAssignment[]
+  deliveryAttempts DeliveryAttempt[]
+
+  @@index([customerId, createdAt])
+  @@index([agencyId, status, createdAt])
+}
+
+model ConsignmentStatusHistory {
+  id            String             @id @default(uuid()) @db.Uuid
+  consignmentId String             @db.Uuid
+  fromStatus    ConsignmentStatus?
+  toStatus      ConsignmentStatus
+  changedById   String?            @db.Uuid
+  createdAt     DateTime           @default(now())
+
+  consignment Consignment @relation(fields: [consignmentId], references: [id], onDelete: Cascade)
+  changedBy   User?       @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([consignmentId, createdAt])
+}
+
+model DeliverySlot {
+  id        String   @id @default(uuid()) @db.Uuid
+  agencyId  String   @db.Uuid
+  date      DateTime @db.Date
+  startTime DateTime @db.Time(0)
+  endTime   DateTime @db.Time(0)
+  capacity  Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agency   CourierAgency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@unique([agencyId, date, startTime, endTime])
+  @@index([agencyId, date, isActive])
+}
+
+model Booking {
+  id            String        @id @default(uuid()) @db.Uuid
+  consignmentId String        @db.Uuid
+  slotId        String        @db.Uuid
+  customerId    String        @db.Uuid
+  agencyId      String        @db.Uuid
+  status        BookingStatus @default(CONFIRMED)
+  slotDate      DateTime      @db.Date
+  slotStartTime DateTime      @db.Time(0)
+  slotEndTime   DateTime      @db.Time(0)
+  bookedAt      DateTime      @default(now())
+  cancelledAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  consignment Consignment    @relation(fields: [consignmentId], references: [id], onDelete: Restrict)
+  slot        DeliverySlot   @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  customer    User           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  agency      CourierAgency  @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  history     BookingHistory[]
+
+  @@index([customerId, status, createdAt])
+  @@index([agencyId, slotDate, status])
+  @@index([slotId, status])
+  @@index([consignmentId, status])
+}
+
+model BookingHistory {
+  id             String              @id @default(uuid()) @db.Uuid
+  bookingId      String              @db.Uuid
+  action         BookingHistoryAction
+  fromSlotDate   DateTime?           @db.Date
+  fromStartTime  DateTime?           @db.Time(0)
+  fromEndTime    DateTime?           @db.Time(0)
+  toSlotDate     DateTime?           @db.Date
+  toStartTime    DateTime?           @db.Time(0)
+  toEndTime      DateTime?           @db.Time(0)
+  changedById    String?             @db.Uuid
+  createdAt      DateTime            @default(now())
+
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  changedBy User?    @relation("BookingActor", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([bookingId, createdAt])
+}
+
+model DeliveryAssignment {
+  id            String   @id @default(uuid()) @db.Uuid
+  consignmentId String   @db.Uuid
+  employeeId    String   @db.Uuid
+  agencyId      String   @db.Uuid
+  assignedById  String?  @db.Uuid
+  assignedAt    DateTime @default(now())
+  unassignedAt  DateTime?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  consignment Consignment   @relation(fields: [consignmentId], references: [id], onDelete: Restrict)
+  employee    User          @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Restrict)
+  assignedBy  User?         @relation("AssignmentActor", fields: [assignedById], references: [id], onDelete: SetNull)
+  agency      CourierAgency @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  attempts    DeliveryAttempt[]
+
+  @@index([agencyId, isActive, assignedAt])
+  @@index([employeeId, isActive, assignedAt])
+  @@index([consignmentId, isActive])
+}
+
+model DeliveryAttempt {
+  id            String                @id @default(uuid()) @db.Uuid
+  consignmentId String                @db.Uuid
+  assignmentId  String                @db.Uuid
+  workerId      String                @db.Uuid
+  status        DeliveryAttemptStatus
+  failureReason String?
+  notes         String?
+  attemptedAt   DateTime              @default(now())
+  createdAt     DateTime              @default(now())
+
+  consignment Consignment        @relation(fields: [consignmentId], references: [id], onDelete: Restrict)
+  assignment  DeliveryAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  worker      User               @relation(fields: [workerId], references: [id], onDelete: Restrict)
+
+  @@index([consignmentId, attemptedAt])
+  @@index([workerId, attemptedAt])
+  @@index([assignmentId, attemptedAt])
 }
